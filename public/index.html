@@ -1,0 +1,91 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Document Q&amp;A with Citations</title><style>
+:root{--ink:#1a1a2e;--line:#dcdce3;--acc:#3b4cf0;--bg:#f7f7f5}
+*{box-sizing:border-box}body{margin:0;font:16px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--ink)}
+main{max-width:900px;margin:0 auto;padding:16px}h1{font-size:1.4rem}
+.card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+input,select{padding:10px;border:1px solid var(--line);border-radius:8px;font:inherit;min-width:0}
+input.t{flex:1 1 180px}
+button{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:9px 14px;font:inherit;cursor:pointer}
+button.g{background:#eee;color:var(--ink)}button:disabled{opacity:.5}
+.err{color:#b91c1c;font-size:.9rem;margin-top:6px}
+.doc{display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);flex-wrap:wrap;align-items:center}
+.badge{font-size:.75rem;padding:2px 8px;border-radius:999px;background:#eceefe;margin-left:6px}.badge.processing{background:#fef3c7}.badge.error{background:#fee2e2}
+.msg{padding:10px 12px;border:1px solid var(--line);border-radius:12px;margin-bottom:10px;background:#fff;overflow-wrap:anywhere;white-space:pre-wrap}.msg.u{background:#eceefe}
+.cite{background:#eceefe;color:var(--acc);border:1px solid var(--acc);border-radius:6px;padding:0 6px;font-size:.8rem;cursor:pointer;margin:0 2px}
+.snip{margin-top:8px;padding:8px;border-left:3px solid var(--acc);background:var(--bg);font-size:.85rem;max-height:180px;overflow:auto;white-space:pre-wrap}
+</style></head><body><main>
+<h1>Document Q&amp;A with Citations</h1>
+<div id="auth" class="card" hidden>
+  <div class="row"><input class="t" id="email" type="email" placeholder="Email"><input class="t" id="pw" type="password" placeholder="Password (8+ characters)"></div>
+  <div class="row" style="margin-top:8px"><button id="login">Log in</button><button class="g" id="register">Create account</button></div>
+  <div class="err" id="autherr"></div>
+</div>
+<div id="app" hidden>
+  <div class="card"><div class="row"><input type="file" id="file" accept="application/pdf"><button class="g" id="logout" style="margin-left:auto">Log out</button></div>
+    <div class="err" id="uperr"></div><div id="docs"></div></div>
+  <div id="chat"></div>
+  <div class="card row"><select id="scope"></select><input class="t" id="q" type="text" placeholder="Ask a question…" maxlength="1000"><button id="send">Ask</button></div>
+</div>
+<script>
+const $=id=>document.getElementById(id);let tok=localStorage.getItem("tok"),timer;
+async function api(path,opt={}){
+  const r=await fetch(path,{...opt,headers:{...(opt.body&&!(opt.body instanceof FormData)?{"Content-Type":"application/json"}:{}),...(tok?{Authorization:"Bearer "+tok}:{})}});
+  const d=await r.json().catch(()=>({}));
+  if(r.status===401&&tok){logout();}
+  if(!r.ok)throw new Error(d.error||"Request failed");return d;
+}
+function show(){$("auth").hidden=!!tok;$("app").hidden=!tok;if(tok)loadDocs()}
+function logout(){tok=null;localStorage.removeItem("tok");clearTimeout(timer);$("chat").innerHTML="";show()}
+async function authGo(path){
+  $("autherr").textContent="";
+  try{const d=await api(path,{method:"POST",body:JSON.stringify({email:$("email").value,password:$("pw").value})});tok=d.token;localStorage.setItem("tok",tok);$("pw").value="";show()}
+  catch(e){$("autherr").textContent=e.message}
+}
+$("login").onclick=()=>authGo("/api/login");$("register").onclick=()=>authGo("/api/register");$("logout").onclick=logout;
+async function loadDocs(){
+  clearTimeout(timer);
+  try{
+    const docs=await api("/api/documents"),box=$("docs");box.innerHTML="";
+    docs.forEach(d=>{const r=document.createElement("div");r.className="doc";
+      const n=document.createElement("span");n.textContent=d.name;
+      const b=document.createElement("span");b.className="badge "+d.status;b.textContent=d.status==="ready"?d.pages+" pages":d.status;n.append(b);
+      if(d.error){const e=document.createElement("div");e.className="err";e.textContent=d.error;n.append(e)}
+      const x=document.createElement("button");x.className="g";x.textContent="Delete";x.onclick=async()=>{await api("/api/documents/"+d.id,{method:"DELETE"});loadDocs()};
+      r.append(n,x);box.append(r)});
+    const sel=$("scope"),cur=sel.value;sel.innerHTML="";sel.add(new Option("All my documents",""));
+    docs.filter(d=>d.status==="ready").forEach(d=>sel.add(new Option(d.name,d.id)));sel.value=cur;
+    if(docs.some(d=>d.status==="processing"))timer=setTimeout(loadDocs,2000);
+  }catch(e){}
+}
+$("file").onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;$("uperr").textContent="";
+  const fd=new FormData();fd.append("file",f);
+  try{await api("/api/documents",{method:"POST",body:fd});loadDocs()}catch(er){$("uperr").textContent=er.message}
+  e.target.value="";
+};
+function add(cls,text){const d=document.createElement("div");d.className="msg "+cls;d.textContent=text;$("chat").append(d);d.scrollIntoView({block:"end"});return d}
+function render(el,text,sources){
+  el.textContent="";
+  text.split(/(\[S\d+(?:\s*,\s*S?\d+)*\])/g).forEach(p=>{
+    const m=p.match(/^\[(S\d+(?:\s*,\s*S?\d+)*)\]$/);
+    if(m){
+      const seen=new Set();
+m[1].match(/\d+/g).forEach(n=>{
+  const k=sources[n-1]&&sources[n-1].doc+sources[n-1].page;if(seen.has(k))return;seen.add(k);
+      });
+    } else p.split(/(\*\*[^*]+\*\*)/g).forEach(q=>{
+      if(/^\*\*[^*]+\*\*$/.test(q)){const s=document.createElement("strong");s.textContent=q.slice(2,-2);el.append(s)}else el.append(q);
+    });
+  });
+}
+async function ask(){
+  const question=$("q").value.trim();if(!question)return;$("q").value="";add("u",question);
+  const out=add("a","Thinking…");$("send").disabled=true;
+  try{const v=$("scope").value;const d=await api("/api/ask",{method:"POST",body:JSON.stringify({question,docId:v?+v:null})});render(out,d.answer,d.sources)}
+  catch(e){out.textContent="Error: "+e.message}
+  $("send").disabled=false;
+}
+$("send").onclick=ask;$("q").onkeydown=e=>{if(e.key==="Enter")ask()};show();
+</script></main></body></html>
