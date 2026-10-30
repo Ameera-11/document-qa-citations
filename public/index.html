@@ -67,18 +67,26 @@ $("file").onchange=async e=>{
 };
 function add(cls,text){const d=document.createElement("div");d.className="msg "+cls;d.textContent=text;$("chat").append(d);d.scrollIntoView({block:"end"});return d}
 function render(el,text,sources){
-  el.textContent="";
+  el.textContent="";let made=0;
+  const chip=s=>{
+    const b=document.createElement("span");b.className="cite";b.textContent=s.doc+" · p."+s.page;
+    b.onclick=()=>{const o=el.querySelector(".snip");if(o)o.remove();const sn=document.createElement("div");sn.className="snip";sn.textContent=s.doc+" — page "+s.page+"\n\n"+s.text;el.append(sn)};
+    made++;return b;
+  };
   text.split(/(\[S\d+(?:\s*,\s*S?\d+)*\])/g).forEach(p=>{
     const m=p.match(/^\[(S\d+(?:\s*,\s*S?\d+)*)\]$/);
     if(m){
       const seen=new Set();
-m[1].match(/\d+/g).forEach(n=>{
-  const k=sources[n-1]&&sources[n-1].doc+sources[n-1].page;if(seen.has(k))return;seen.add(k);
-      });
+      m[1].match(/\d+/g).forEach(n=>{const s=sources[n-1];if(!s)return;const k=s.doc+s.page;if(seen.has(k))return;seen.add(k);el.append(chip(s))});
     } else p.split(/(\*\*[^*]+\*\*)/g).forEach(q=>{
       if(/^\*\*[^*]+\*\*$/.test(q)){const s=document.createElement("strong");s.textContent=q.slice(2,-2);el.append(s)}else el.append(q);
     });
   });
+  if(!made&&sources.length){
+    const d=document.createElement("div");d.append("Sources: ");const seen=new Set();
+    sources.slice(0,3).forEach(s=>{const k=s.doc+s.page;if(seen.has(k))return;seen.add(k);d.append(chip(s)," ")});
+    el.append(d);
+  }
 }
 async function ask(){
   const question=$("q").value.trim();if(!question)return;$("q").value="";add("u",question);
